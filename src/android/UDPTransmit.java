@@ -22,6 +22,7 @@
 package edu.uic.udptransmit;
 
 import org.apache.cordova.CordovaPlugin;
+import org.apache.cordova.PluginResult;
 import org.apache.cordova.CallbackContext;
 
 import java.io.IOException;
@@ -33,92 +34,116 @@ import java.net.SocketException;
 import java.net.UnknownHostException;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 import org.json.JSONException;
 
 public class UDPTransmit extends CordovaPlugin {
-	
-	DatagramPacket datagramPacket;
-	DatagramSocket datagramSocket;
-
-    CallbackContext receivingCallbackContext = null;
-    Timer timer = null;
     
-	// Constructor
-	public UDPTransmit() {
-	}
-	
-	// Handles and dispatches "exec" calls from the JS interface (udptransmit.js)
-	@Override
-	public boolean execute(String action, JSONArray args, final CallbackContext callbackContext) throws JSONException {
-		if("initialize".equals(action)) {
-			final String host = args.getString(0);
-			final int port = args.getInt(1);
-			// Run the UDP transmitter initialization on its own thread (just in case, see sendMessage comment)
-			cordova.getThreadPool().execute(new Runnable() {
-            	public void run() {
-            		this.initialize(host, port, callbackContext);
-            	}
-            	private void initialize(String host, int port, CallbackContext callbackContext) {
-            		// create packet
-            		InetAddress address = null;
-            		try {
-            			address = InetAddress.getByName(host);
-            		} catch (UnknownHostException e) {
-            			// TODO Auto-generated catch block
-            			e.printStackTrace();
-            		}
-            		
-            		byte[] bytes= new byte[0];
-            		datagramPacket = new DatagramPacket(bytes, 0, address, port);
-					
-            		// create socket
-            		try {
-            			datagramSocket = new DatagramSocket(port);
-            			callbackContext.success("Success initializing UDP transmitter using datagram socket: " + datagramSocket);
-						
-            		} catch (SocketException e) {
-            			callbackContext.error("Error initializing UDP transmitter using datagram socket: " + datagramSocket);
-            			// TODO Auto-generated catch block
-            			e.printStackTrace();
-            		}
-            	}
+    DatagramSocket datagramSocket;
+    
+    CallbackContext receivingCallbackContext = null;
+    
+    // Constructor
+    public UDPTransmit() {
+    }
+    
+    // Handles and dispatches "exec" calls from the JS interface (udptransmit.js)
+    @Override
+    public boolean execute(String action, JSONArray args, final CallbackContext callbackContext) throws JSONException {
+        if("initialize".equals(action)) {
+            final int port = args.getInt(0);
+            // Run the UDP transmitter initialization on its own thread (just in case, see sendMessage comment)
+            cordova.getThreadPool().execute(new Runnable() {
+                public void run() {
+                    this.initialize(port, callbackContext);
+                }
+                private void initialize(int port, CallbackContext callbackContext) {
+                    // create socket
+                    try {
+                        datagramSocket = new DatagramSocket(port);
+                        callbackContext.success("Success initializing UDP transmitter using datagram socket");
+                        
+                    } catch (SocketException e) {
+                        callbackContext.error("Error initializing UDP transmitter using datagram socket");
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
+                }
             });
- 			return true;
-		}
-		else if("sendMessage".equals(action)) {
-			final String message = args.getString(0);
-			// Run the UDP transmission on its own thread (it fails on some Android environments if run on the same thread)
-			cordova.getThreadPool().execute(new Runnable() {
-            	public void run() {
-            		this.sendMessage(message, callbackContext);
-            	}
- 				private void sendMessage(String data, CallbackContext callbackContext) {
-					byte[] bytes = data.getBytes();
-					datagramPacket.setData(bytes);
-					try {
-						datagramSocket.send(datagramPacket);
-						callbackContext.success("Success transmitting UDP packet: " + datagramPacket);
-					} catch (IOException e) {
-						// TODO Auto-generated catch block
-						callbackContext.error("Error transmitting UDP packet: " + datagramPacket);
-						e.printStackTrace();
-					}
-				}
-			});
-			return true;
-		}
-        else if("getMessage".equals(action)) {
+            return true;
+        }
+        else if("sendMessage".equals(action)) {
+            final String host = args.getString(0);
+            final int destPort = Integer.parseInt(args.getString(1));
+            final String message = args.getString(2);
+            // Run the UDP transmission on its own thread (it fails on some Android environments if run on the same thread)
+            cordova.getThreadPool().execute(new Runnable() {
+                public void run() {
+                    try{
+                        final InetAddress addr = getHostAddress(host);
+                        this.sendMessage(addr,destPort,message, callbackContext);
+                    }
+                    catch (UnknownHostException e) {
+                        callbackContext.error("Error: Unknown Host");
+                        e.printStackTrace();
+                    }
+                    catch (IOException e){
+                        callbackContext.error("Error: fail to transmit UDP packet");
+                        e.printStackTrace();
+                    }
+                }
+                private InetAddress getHostAddress(String hostStr) throws UnknownHostException{
+                    return InetAddress.getByName(hostStr);
+                }
+                private void sendMessage(InetAddress addr,int destPort,String data, CallbackContext callbackContext) throws IOException {
+                    byte[] bytes = data.getBytes();
+                    DatagramPacket datagramPacket = new DatagramPacket(bytes, bytes.length,addr, destPort);
+                    datagramSocket.send(datagramPacket);
+                    callbackContext.success("Success transmitting UDP packet");
+                }
+            });
+            return true;
+        }
+        else if("onReceive".equals(action)) {
             receivingCallbackContext = callbackContext; // save the callback context
             
             // execute asynchronous task
             cordova.getThreadPool().execute(new Runnable(){
-                for(int i = 0; i <  Integer.MAX_VALUE; i++); // heavy task
-                
-                PluginResult result = new PluginResult(PluginResult.Status.OK, "Success receiving UDP packet: ");
-                result.setKeepCallback(false); // dont keep callback after this call
-                if(this.receivingCallbackContext != null){
-                    this.receivingCallbackContext.sendPluginResult(result); // send results
-                    this.receivingCallbackContext = null; // release the memory
+                public void run(){
+                    while(true){
+                        try {
+                            JSONObject json  = new JSONObject();
+                            byte[] receiveData = new byte[1024];
+                            DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
+                            
+                            datagramSocket.receive(receivePacket);
+                            
+                            String message = new String(receivePacket.getData());
+                            InetAddress sender = receivePacket.getAddress();
+                            Integer senderPort = receivePacket.getPort();
+                            
+                            json.put("message", message);
+                            json.put("sender", sender.toString());
+                            json.put("senderPort", senderPort.toString());
+                            
+                            
+                            PluginResult result = new PluginResult(PluginResult.Status.OK, json.toString());
+                            result.setKeepCallback(true);           // keep callback after this call
+                            receivingCallbackContext.sendPluginResult(result);
+                        }
+                        catch(JSONException e){
+                            PluginResult result = new PluginResult(PluginResult.Status.ERROR, "Error: fail to create json object");
+                            result.setKeepCallback(true);           // keep callback after this call
+                            receivingCallbackContext.sendPluginResult(result);
+                            e.printStackTrace();
+                        }
+                        catch(IOException e){
+                            PluginResult result = new PluginResult(PluginResult.Status.ERROR, "Error: fail to receive UDP packet");
+                            result.setKeepCallback(true);           // keep callback after this call
+                            receivingCallbackContext.sendPluginResult(result);
+                            e.printStackTrace();
+                        }
+                    }
                 }
             });
             
@@ -128,6 +153,6 @@ public class UDPTransmit extends CordovaPlugin {
             this.receivingCallbackContext.sendPluginResult(result);
             return true;
         }
-		return false;
-	}
+        return false;
+    }
 }
