@@ -112,7 +112,7 @@ public class UDPTransmit extends CordovaPlugin {
             
             // execute asynchronous task
             cordova.getThreadPool().execute(new Runnable(){
-                for(int i = 0; i <  Integer.MAX_VALUE, i++); // heavy task
+                for(int i = 0; i <  Integer.MAX_VALUE; i++); // heavy task
                 
                 PluginResult result = new PluginResult(PluginResult.Status.OK, "Success receiving UDP packet: ");
                 result.setKeepCallback(false); // dont keep callback after this call
