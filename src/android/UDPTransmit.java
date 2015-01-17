@@ -118,7 +118,7 @@ public class UDPTransmit extends CordovaPlugin {
                             
                             datagramSocket.receive(receivePacket);
                             
-                            String message = new String(receivePacket.getData());
+                            String message = new String(receivePacket.getData(), 0, receivePacket.getLength());
                             InetAddress sender = receivePacket.getAddress();
                             Integer senderPort = receivePacket.getPort();
                             
